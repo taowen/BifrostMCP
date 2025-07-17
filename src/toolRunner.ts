@@ -10,6 +10,18 @@ export const runTool = async (name: string, args: any) => {
     if (!toolNames.includes(name)) {
         throw new Error(`Unknown tool: ${name}`);
     }
+    if (name === "ask_user_by_input_box") {
+        const userInput = await vscode.window.showInputBox({
+            prompt: args.message || 'Please provide your input',
+            placeHolder: args.placeholder || '',
+            ignoreFocusOut: true
+        });
+        result = {
+            userResponse: userInput || '',
+            cancelled: userInput === undefined
+        };
+        return result
+    }
     // Verify file exists before proceeding
     const uri = vscode.Uri.parse(args?.textDocument?.uri ?? '');
     try {

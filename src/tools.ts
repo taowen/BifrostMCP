@@ -792,6 +792,25 @@ export const mcpTools = [
             },
             required: ["query"]
         }
+    },
+    {
+        name: "ask_user_by_input_box",
+        description: "Shows a message to the user in an input box and waits for their text response. This is useful when the AI needs user approval, clarification, or additional input during code generation or analysis.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                message: {
+                    type: "string",
+                    description: "The message to display to the user in the input box"
+                },
+                placeholder: {
+                    type: "string",
+                    description: "Optional placeholder text to show in the input box",
+                    default: ""
+                }
+            },
+            required: ["message"]
+        }
     }
 ];
 
@@ -871,5 +890,5 @@ export const toolsDescriptions = [
     {
         name: "get_workspace_symbols",
         description: "Search for symbols across the workspace"
-    }
+    },
 ];
