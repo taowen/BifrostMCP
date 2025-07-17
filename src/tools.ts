@@ -794,22 +794,35 @@ export const mcpTools = [
         }
     },
     {
-        name: "ask_user_by_input_box",
-        description: "Shows a message to the user in an input box and waits for their text response. This is useful when the AI needs user approval, clarification, or additional input during code generation or analysis.",
+        name: "ask_user_by_todo_list",
+        description: "Shows a todo list to the user and collects their approval feedback. Each todo item has a completion status (completed/pending). The user can review the list and provide approval comments.",
         inputSchema: {
             type: "object",
             properties: {
-                message: {
+                optionalShortDesign: {
                     type: "string",
-                    description: "The message to display to the user in the input box"
+                    description: "The short message about the key design, if you need to explain the function signature or header files"
                 },
-                placeholder: {
-                    type: "string",
-                    description: "Optional placeholder text to show in the input box",
-                    default: ""
+                todoItems: {
+                    type: "array",
+                    description: "Array of todo items to display",
+                    items: {
+                        type: "object",
+                        properties: {
+                            description: {
+                                type: "string",
+                                description: "Description of the todo item"
+                            },
+                            completed: {
+                                type: "boolean",
+                                description: "Whether the todo item is completed (true) or pending (false)"
+                            }
+                        },
+                        required: ["description", "completed"]
+                    }
                 }
             },
-            required: ["message"]
+            required: ["todoItems"]
         }
     }
 ];

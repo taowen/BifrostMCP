@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { createVscodePosition, getPreview, convertSymbol, asyncMap, convertSemanticTokens, getSymbolKindString, transformLocations, transformSingleLocation } from './helpers';
 import { ReferencesAndPreview, RenameEdit } from './rosyln';
 import { mcpTools } from './tools';
+import { handleTodoListReview } from './todoReview';
 
 const toolNames = mcpTools.map((tool) => tool.name);
 
@@ -10,17 +11,9 @@ export const runTool = async (name: string, args: any) => {
     if (!toolNames.includes(name)) {
         throw new Error(`Unknown tool: ${name}`);
     }
-    if (name === "ask_user_by_input_box") {
-        const userInput = await vscode.window.showInputBox({
-            prompt: args.message || 'Please provide your input',
-            placeHolder: args.placeholder || '',
-            ignoreFocusOut: true
-        });
-        result = {
-            userResponse: userInput || '',
-            cancelled: userInput === undefined
-        };
-        return result
+    if (name === "ask_user_by_todo_list") {
+        result = await handleTodoListReview(args);
+        return result;
     }
     // Verify file exists before proceeding
     const uri = vscode.Uri.parse(args?.textDocument?.uri ?? '');
@@ -636,4 +629,4 @@ export const runTool = async (name: string, args: any) => {
             throw new Error(`Unknown tool: ${name}`);
     }
     return result;
-}
+};
