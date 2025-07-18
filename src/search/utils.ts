@@ -89,3 +89,146 @@ export async function searchInWorkspace(searchText: string): Promise<SearchResul
     
     return results;
 }
+
+/**
+ * 获取项目结构信息
+ */
+export async function getProjectStructure(): Promise<string> {
+    try {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            return '没有打开的工作区文件夹';
+        }
+
+        const rootPath = workspaceFolders[0].uri;
+        let structure = `项目根目录: ${rootPath.fsPath}\n\n`;
+        
+        // 获取目录树结构
+        structure += '项目文件树:\n';
+        structure += await buildDirectoryTree(rootPath, '', 0, 3); // 限制深度为3层
+        
+        // 获取重要配置文件信息
+        structure += '\n\n重要配置文件:\n';
+        const configFiles = await getConfigFilesInfo(rootPath);
+        structure += configFiles;
+        
+        return structure;
+    } catch (error) {
+        return `获取项目结构失败: ${error}`;
+    }
+}
+
+/**
+ * 构建目录树
+ */
+async function buildDirectoryTree(uri: vscode.Uri, prefix: string, depth: number, maxDepth: number): Promise<string> {
+    if (depth > maxDepth) {
+        return '';
+    }
+    
+    let tree = '';
+    try {
+        const entries = await vscode.workspace.fs.readDirectory(uri);
+        // 过滤掉不重要的目录
+        const filteredEntries = entries.filter(([name, type]) => {
+            const ignoreDirs = ['node_modules', '.git', 'dist', 'build', 'out', '.vscode', 'coverage'];
+            const ignoreFiles = ['.DS_Store', 'Thumbs.db'];
+            
+            if (type === vscode.FileType.Directory && ignoreDirs.includes(name)) {
+                return false;
+            }
+            if (type === vscode.FileType.File && ignoreFiles.includes(name)) {
+                return false;
+            }
+            return true;
+        });
+        
+        // 排序：目录在前，然后按名称排序
+        filteredEntries.sort(([nameA, typeA], [nameB, typeB]) => {
+            if (typeA === typeB) {
+                return nameA.localeCompare(nameB);
+            }
+            return typeA === vscode.FileType.Directory ? -1 : 1;
+        });
+        
+        for (let i = 0; i < Math.min(filteredEntries.length, 20); i++) { // 限制每层显示的条目数
+            const [name, type] = filteredEntries[i];
+            const isLast = i === filteredEntries.length - 1;
+            const connector = isLast ? '└── ' : '├── ';
+            const nextPrefix = prefix + (isLast ? '    ' : '│   ');
+            
+            if (type === vscode.FileType.Directory) {
+                tree += `${prefix}${connector}${name}/\n`;
+                const subUri = vscode.Uri.joinPath(uri, name);
+                tree += await buildDirectoryTree(subUri, nextPrefix, depth + 1, maxDepth);
+            } else {
+                tree += `${prefix}${connector}${name}\n`;
+            }
+        }
+        
+        if (filteredEntries.length > 20) {
+            tree += `${prefix}... (还有 ${filteredEntries.length - 20} 个项目)\n`;
+        }
+    } catch (error) {
+        tree += `${prefix}错误: 无法读取目录\n`;
+    }
+    
+    return tree;
+}
+
+/**
+ * 获取重要配置文件信息
+ */
+async function getConfigFilesInfo(rootUri: vscode.Uri): Promise<string> {
+    let info = '';
+    const configFiles = [
+        'package.json',
+        'tsconfig.json', 
+        'webpack.config.js',
+        'vite.config.js',
+        'rollup.config.js',
+        'babel.config.js',
+        '.eslintrc.json',
+        '.eslintrc.js',
+        'eslint.config.mjs',
+        'prettier.config.js',
+        'README.md',
+        'CHANGELOG.md'
+    ];
+    
+    for (const fileName of configFiles) {
+        try {
+            const fileUri = vscode.Uri.joinPath(rootUri, fileName);
+            const stat = await vscode.workspace.fs.stat(fileUri);
+            if (stat.type === vscode.FileType.File) {
+                info += `- ${fileName}: 存在\n`;
+                
+                // 对于 package.json，获取一些关键信息
+                if (fileName === 'package.json') {
+                    try {
+                        const content = await vscode.workspace.fs.readFile(fileUri);
+                        const packageJson = JSON.parse(content.toString());
+                        if (packageJson.name) info += `  名称: ${packageJson.name}\n`;
+                        if (packageJson.version) info += `  版本: ${packageJson.version}\n`;
+                        if (packageJson.description) info += `  描述: ${packageJson.description}\n`;
+                        if (packageJson.main) info += `  入口: ${packageJson.main}\n`;
+                        if (packageJson.scripts) {
+                            const scripts = Object.keys(packageJson.scripts);
+                            info += `  脚本: ${scripts.slice(0, 5).join(', ')}${scripts.length > 5 ? '...' : ''}\n`;
+                        }
+                    } catch (e) {
+                        info += `  (无法解析内容)\n`;
+                    }
+                }
+            }
+        } catch (error) {
+            // 文件不存在，跳过
+        }
+    }
+    
+    if (info === '') {
+        info = '未找到常见配置文件\n';
+    }
+    
+    return info;
+}

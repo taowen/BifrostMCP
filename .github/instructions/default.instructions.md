@@ -44,34 +44,16 @@ npm install
 
 # 编译项目
 npm run compile
-
-# 启动开发模式（监听文件变化自动编译）
-npm run watch
 ```
 
 ### 可用的 npm 脚本
 - `npm run compile` - 编译 TypeScript 代码
-- `npm run watch` - 监听模式编译（开发时使用）
 - `npm run package` - 生产环境打包
 - `npm run compile-tests` - 编译测试文件
-- `npm run watch-tests` - 监听模式编译测试
 - `npm run lint` - 代码风格检查
 - `npm run test` - 运行测试套件（包含预编译、构建、代码检查）
 
-### VS Code 任务
-- **npm: watch** (任务ID: npm: 0) - 默认构建任务，后台运行
-- **npm: watch-tests** (任务ID: npm: 1) - 测试监听任务
-
 ## 开发工作流
-
-### 1. 日常开发
-```powershell
-# 启动监听编译（在后台运行）
-npm run watch
-
-# 在 VS Code 中按 F5 启动调试，或者
-# Ctrl+Shift+P -> "Developer: Reload Window" 重新加载扩展
-```
 
 ### 2. 测试
 ```powershell

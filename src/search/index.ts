@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { DebugLogger } from './logger';
-import { analyzeIntentAndExtractEntities, directChatResponse } from './intent';
-import { executeSearchStrategy, searchForEntity } from './strategies';
+import { analyzeQueryAndSearch, directChatResponse } from './intent';
 import { scoreRelevance, integrateFinalContext } from './scoring';
 import { SearchResultItem } from './types';
 
@@ -21,48 +20,25 @@ export async function smartSearch(prompt: string): Promise<string> {
             return '❌ 没有打开的工作区文件夹。请先打开一个包含代码的文件夹。';
         }
         
-        // 第一步：分析意图并提取实体
-        DebugLogger.log('Step 1: Analyzing intent and extracting entities');
-        const intentAnalysis = await analyzeIntentAndExtractEntities(prompt);
-        DebugLogger.log('Intent analysis result:', intentAnalysis);
+        // 使用大模型分析查询并执行搜索
+        DebugLogger.log('Step 1: Analyzing query and executing search');
+        const searchResults = await analyzeQueryAndSearch(prompt);
+        DebugLogger.log(`Found ${searchResults.length} initial results`);
         
-        if (intentAnalysis.intent === 'other' && intentAnalysis.entities.length === 0 && intentAnalysis.keyTerms.length === 0) {
-            DebugLogger.log('No actionable information found, using direct chat response');
+        // 如果没有找到任何结果，使用直接聊天响应
+        if (searchResults.length === 0) {
+            DebugLogger.log('No search results found, using direct chat response');
             return await directChatResponse(prompt);
         }
         
-        // 第二步：根据搜索策略执行多维度搜索
-        DebugLogger.log('Step 2: Executing multi-dimensional search');
-        let searchResults: SearchResultItem[] = [];
-        
-        for (const strategy of intentAnalysis.searchStrategy) {
-            DebugLogger.log(`Executing search strategy: ${strategy}`);
-            const strategyResults = await executeSearchStrategy(strategy, intentAnalysis);
-            DebugLogger.log(`Found ${strategyResults.length} results for strategy: ${strategy}`);
-            searchResults.push(...strategyResults);
-        }
-        
-        // 第三步：根据实体进行精准搜索
-        if (intentAnalysis.entities.length > 0) {
-            DebugLogger.log('Step 3: Searching for specific entities');
-            for (const entity of intentAnalysis.entities) {
-                if (entity.type !== 'concept') { // 跳过概念性实体
-                    DebugLogger.log(`Searching for entity: ${entity.name} (${entity.type})`);
-                    const entityResults = await searchForEntity(entity);
-                    DebugLogger.log(`Found ${entityResults.length} results for entity ${entity.name}`);
-                    searchResults.push(...entityResults);
-                }
-            }
-        }
-        
-        // 第四步：相关性打分和排序
-        DebugLogger.log('Step 4: Scoring relevance');
+        // 相关性打分和排序
+        DebugLogger.log('Step 2: Scoring relevance');
         const scoredResults = await scoreRelevance(prompt, searchResults);
         DebugLogger.log(`Scored ${scoredResults.length} results`);
         
-        // 第五步：整合上下文信息
-        DebugLogger.log('Step 5: Integrating final context');
-        const finalContext = await integrateFinalContext(prompt, scoredResults, intentAnalysis);
+        // 整合最终上下文信息
+        DebugLogger.log('Step 3: Integrating final context');
+        const finalContext = await integrateFinalContext(prompt, scoredResults, null);
         
         DebugLogger.log('Smart search completed successfully');
         
@@ -81,6 +57,5 @@ export async function smartSearch(prompt: string): Promise<string> {
 export * from './types';
 export * from './logger';
 export * from './intent';
-export * from './strategies';
 export * from './scoring';
 export * from './utils';
