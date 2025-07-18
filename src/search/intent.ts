@@ -49,9 +49,8 @@ ${projectStructure}
 只返回JSON，不要其他解释：
 `;
 
-    DebugLogger.logGPTCall(analysisPrompt, '');
     const response = await useCopilotChat(analysisPrompt);
-    DebugLogger.logGPTCall(analysisPrompt, response);
+    DebugLogger.logGPTCall('Intent analysis', analysisPrompt, response);
     
     const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const searchPlan = JSON.parse(cleanResponse);
@@ -223,9 +222,8 @@ ${projectStructure}
 只返回JSON，不要其他解释：
 `;
 
-    DebugLogger.logGPTCall(analysisPrompt, '');
     const response = await useCopilotChat(analysisPrompt);
-    DebugLogger.logGPTCall(analysisPrompt, response);
+    DebugLogger.logGPTCall('Entity extraction', analysisPrompt, response);
     
     const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     return JSON.parse(cleanResponse);

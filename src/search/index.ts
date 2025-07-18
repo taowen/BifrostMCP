@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { DebugLogger } from './logger';
 import { analyzeQueryAndSearch, directChatResponse } from './intent';
-import { rankResultsByRelevance, integrateFinalContext } from './ranking';
+import { rankResultsByRelevance } from './ranking';
+import { integrateFinalContext, formatContextResult } from './context';
 import { SearchResultItem } from './types';
 
 /**
@@ -38,11 +39,11 @@ export async function smartSearch(prompt: string): Promise<string> {
         
         // 整合最终上下文信息
         DebugLogger.log('Step 3: Integrating final context');
-        const finalContext = await integrateFinalContext(prompt, rankedResults, null);
+        const contextResult = await integrateFinalContext(prompt, rankedResults, null);
         
         DebugLogger.log('Smart search completed successfully');
         
-        return finalContext;
+        return formatContextResult(contextResult);
         
     } catch (error) {
         DebugLogger.log('Smart search error:', error);
@@ -58,4 +59,5 @@ export * from './types';
 export * from './logger';
 export * from './intent';
 export * from './ranking';
+export * from './context';
 export * from './utils';

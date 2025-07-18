@@ -23,13 +23,16 @@ export class DebugLogger {
         }
     }
     
-    static logGPTCall(prompt: string, response: string) {
+    static logGPTCall(description: string, prompt: string, response?: string) {
         this.init();
         this.outputChannel?.appendLine('=== GPT 调用 ===');
+        this.outputChannel?.appendLine(`Description: ${description}`);
         this.outputChannel?.appendLine('Prompt:');
         this.outputChannel?.appendLine(prompt);
-        this.outputChannel?.appendLine('\nResponse:');
-        this.outputChannel?.appendLine(response);
+        if (response) {
+            this.outputChannel?.appendLine('\nResponse:');
+            this.outputChannel?.appendLine(response);
+        }
         this.outputChannel?.appendLine('================');
     }
     
