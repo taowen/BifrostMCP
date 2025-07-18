@@ -121,7 +121,6 @@ async function searchWorkspaceSymbols(searchTerm: string): Promise<SearchResultI
                         uri: symbol.location.uri,
                         content,
                         symbolInfo: symbol,
-                        relevanceScore: 0,
                         description: `Symbol: ${symbol.name} (${vscode.SymbolKind[symbol.kind]})`
                     });
                 } catch (error) {
@@ -154,7 +153,6 @@ async function searchFiles(searchTerm: string, patterns?: string[]): Promise<Sea
             results.push({
                 uri: file,
                 content: content.length > 1000 ? content.substring(0, 1000) + '...' : content,
-                relevanceScore: 0,
                 description: `File: ${vscode.workspace.asRelativePath(file)}`
             });
         }

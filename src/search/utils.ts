@@ -80,7 +80,6 @@ export async function searchInWorkspace(searchText: string): Promise<SearchResul
                 results.push({
                     uri: file,
                     content: matchingLines.join('\n'),
-                    relevanceScore: 0,
                     description: `Text match for "${searchText}" in ${file.fsPath}`
                 });
             }
