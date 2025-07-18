@@ -3,6 +3,7 @@ import { createVscodePosition, getPreview, convertSymbol, asyncMap, convertSeman
 import { ReferencesAndPreview, RenameEdit } from './rosyln';
 import { mcpTools } from './tools';
 import { handleTodoListReview } from './todoReview';
+import { smartSearch } from './search/index';
 
 const toolNames = mcpTools.map((tool) => tool.name);
 
@@ -14,6 +15,12 @@ export const runTool = async (name: string, args: any) => {
     if (name === "ask_user_by_todo_list") {
         result = await handleTodoListReview(args);
         return result;
+    }
+    if (name === "smart_search") {
+        const searchResult = await smartSearch(args.prompt);
+        return {
+            "searchResult": searchResult
+        };
     }
     // Verify file exists before proceeding
     const uri = vscode.Uri.parse(args?.textDocument?.uri ?? '');

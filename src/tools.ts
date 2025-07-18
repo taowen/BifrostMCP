@@ -824,7 +824,21 @@ export const mcpTools = [
             },
             required: ["todoItems"]
         }
-    }
+    },
+    {
+        name: "smart_search",
+        description: "智能搜索工具，使用自然语言查询在工作区中查找相关代码和文档。",
+        inputSchema: {
+            type: "object",
+            properties: {
+                prompt: {
+                    type: "string",
+                    description: "自然语言查询提示，描述你要搜索的内容。例如：'如何实现用户认证'，'查找错误处理相关代码'，'项目的配置文件在哪里'等"
+                }
+            },
+            required: ["prompt"]
+        }
+    },
 ];
 
 export const toolsDescriptions = [

@@ -1,6 +1,6 @@
 {
-  "name": "bifrost-mcp",
-  "displayName": "Bifrost - VSCode Dev Tools MCP Server",
+  "name": "smart-assistant",
+  "displayName": "Smart Assistant",
   "description": "An MCP server that exposes features of VSCode dev tools to the MCP clients",
   "version": "0.0.14",
   "publisher": "ConnorHallman",
