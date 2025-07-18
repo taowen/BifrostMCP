@@ -43,7 +43,7 @@ export async function smartSearch(prompt: string): Promise<string> {
         
         DebugLogger.log('Smart search completed successfully');
         
-        return formatContextResult(contextResult);
+        return await formatContextResult(contextResult);
         
     } catch (error) {
         DebugLogger.log('Smart search error:', error);

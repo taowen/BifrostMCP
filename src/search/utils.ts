@@ -2,6 +2,45 @@ import * as vscode from 'vscode';
 import { SearchResultItem } from './types';
 
 /**
+ * 获取扩展上下文内容
+ * @param uri 文件URI
+ * @param range 原始范围
+ * @param contextLines 上下文行数
+ * @returns 扩展后的内容
+ */
+export async function getExtendedContext(uri: vscode.Uri, range?: vscode.Range, contextLines: number = 10): Promise<string> {
+    try {
+        const document = await vscode.workspace.openTextDocument(uri);
+        
+        if (!range) {
+            // 如果没有指定范围，返回文件开头的内容
+            const maxLines = Math.min(contextLines * 2, document.lineCount);
+            const endRange = new vscode.Range(0, 0, maxLines - 1, 0);
+            return document.getText(endRange);
+        }
+        
+        // 扩展范围以获取更多上下文
+        const expandedRange = new vscode.Range(
+            Math.max(0, range.start.line - contextLines),
+            0,
+            Math.min(document.lineCount - 1, range.end.line + contextLines),
+            Number.MAX_SAFE_INTEGER
+        );
+        
+        const content = document.getText(expandedRange);
+        
+        // 如果内容太长，适当截断
+        if (content.length > 3000) {
+            return content.substring(0, 3000) + '\n... (内容已截断)';
+        }
+        
+        return content;
+    } catch (error) {
+        return `无法获取扩展上下文: ${error}`;
+    }
+}
+
+/**
  * 获取符号内容
  */
 export async function getSymbolContent(symbol: vscode.SymbolInformation): Promise<string> {

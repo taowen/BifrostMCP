@@ -1,5 +1,6 @@
 import { DebugLogger } from './logger';
-import { SearchResultItem, IntentAnalysis } from './types';
+import { SearchResultItem, IntentAnalysis, RankedResultItem } from './types';
+import { useCopilotChat } from '../copilotChat';
 
 /**
  * 上下文整合结果
@@ -25,6 +26,10 @@ export interface FactItem {
     sourceIndex: number;
     /** 重要性等级 (1-5) */
     importance: number;
+    /** 大模型评论 */
+    comment?: string;
+    /** 评分 */
+    score?: number;
 }
 
 /**
@@ -39,6 +44,12 @@ export interface SourceLocation {
     codeSnippet: string;
     /** 行号范围（如果有） */
     lineRange?: string;
+    /** 扩展上下文 */
+    extendedContext?: string;
+    /** 评分 */
+    score?: number;
+    /** 评论 */
+    comment?: string;
 }
 
 /**
@@ -46,7 +57,7 @@ export interface SourceLocation {
  */
 export async function integrateFinalContext(
     originalPrompt: string, 
-    rankedResults: SearchResultItem[], 
+    rankedResults: RankedResultItem[], 
     intentAnalysis?: IntentAnalysis | null
 ): Promise<ContextIntegrationResult> {
     DebugLogger.log(`Integrating final context for ${rankedResults.length} results`);
@@ -61,7 +72,10 @@ export async function integrateFinalContext(
         codeSnippet: result.content,
         lineRange: result.symbolInfo?.location?.range ? 
             `${result.symbolInfo.location.range.start.line + 1}-${result.symbolInfo.location.range.end.line + 1}` : 
-            undefined
+            undefined,
+        extendedContext: result.extendedContext,
+        score: result.score,
+        comment: result.comment
     }));
     
     // 提取事实信息
@@ -82,14 +96,16 @@ export async function integrateFinalContext(
             factType = 'configuration';
         }
         
-        // 计算重要性（基于排序位置，前面的更重要）
-        const importance = Math.max(1, 5 - Math.floor(index / 2));
+        // 使用大模型的评分作为重要性，如果没有评分则基于排序位置
+        const importance = result.score ? Math.min(5, Math.ceil(result.score / 2)) : Math.max(1, 5 - Math.floor(index / 2));
         
         facts.push({
             type: factType,
             content: result.content,
             sourceIndex: index,
-            importance: importance
+            importance: importance,
+            comment: result.comment,
+            score: result.score
         });
     });
     
@@ -111,7 +127,7 @@ export async function integrateFinalContext(
  */
 function generateSearchSummary(
     originalPrompt: string, 
-    results: SearchResultItem[], 
+    results: RankedResultItem[], 
     intentAnalysis?: IntentAnalysis | null
 ): string {
     const fileCount = new Set(results.map(r => r.uri.fsPath)).size;
@@ -144,24 +160,130 @@ function generateSearchSummary(
 }
 
 /**
- * 格式化上下文结果为文本
+ * 格式化上下文结果为文本 - 使用大模型整合事实线索
  */
-export function formatContextResult(context: ContextIntegrationResult): string {
+export async function formatContextResult(context: ContextIntegrationResult): Promise<string> {
+    try {
+        DebugLogger.log('Starting AI-powered context formatting');
+        
+        // 构建用于大模型的整合提示
+        const integrationPrompt = buildIntegrationPrompt(context);
+        
+        // 调用大模型进行整合
+        const aiResponse = await useCopilotChat(integrationPrompt);
+        
+        DebugLogger.log('AI context integration completed');
+        return aiResponse;
+        
+    } catch (error) {
+        DebugLogger.log('AI integration failed, falling back to simple format:', error);
+        // 如果大模型调用失败，使用简化的格式化
+        return formatContextResultSimple(context);
+    }
+}
+
+/**
+ * 构建用于大模型整合的提示
+ */
+function buildIntegrationPrompt(context: ContextIntegrationResult): string {
+    let prompt = `# 代码搜索结果整合任务
+
+## 任务要求
+请基于以下搜索结果，整理出有助于理解代码的**事实线索**，而不是直接给出结论。重点是：
+1. 列出关键的代码位置和定义
+2. 提供代码片段的上下文说明
+3. 指出相关的文件和功能模块
+4. 保持客观，提供线索而非判断
+
+## 搜索摘要
+${context.summary}
+
+## 发现的关键信息
+
+`;
+
+    // 按重要性排序事实
+    const sortedFacts = [...context.facts].sort((a, b) => b.importance - a.importance);
+    
+    // 为每个事实添加详细信息
+    sortedFacts.forEach((fact, index) => {
+        const source = context.sources[fact.sourceIndex];
+        
+        prompt += `### 线索 ${index + 1}: ${fact.type.toUpperCase()}
+**位置**: ${source.filePath}`;
+        
+        if (source.lineRange) {
+            prompt += ` (行 ${source.lineRange})`;
+        }
+        
+        prompt += `
+**描述**: ${source.description}
+**重要性**: ${fact.importance}/5`;
+        
+        if (fact.score) {
+            prompt += ` (AI评分: ${fact.score}/10)`;
+        }
+        
+        prompt += `
+
+**代码片段**:
+\`\`\`
+${fact.content}
+\`\`\`
+
+`;
+        
+        // 如果有扩展上下文，添加部分内容
+        if (source.extendedContext && source.extendedContext !== fact.content) {
+            prompt += `**扩展上下文**:
+\`\`\`
+${source.extendedContext.slice(0, 500)}${source.extendedContext.length > 500 ? '...' : ''}
+\`\`\`
+
+`;
+        }
+    });
+    
+    prompt += `
+## 请整理输出
+请基于以上信息，整理出：
+1. **关键代码位置**: 列出主要的文件和函数/类位置
+2. **功能模块**: 说明涉及的主要功能模块
+3. **代码关系**: 指出代码片段之间的关联
+4. **实现细节**: 提供有助于理解的技术细节
+
+输出格式要求：
+- 使用清晰的 Markdown 格式
+- 保持客观描述，避免主观判断
+- 重点突出位置信息和代码片段
+- 如果有多个相关文件，按重要性排序`;
+
+    return prompt;
+}
+
+/**
+ * 简化的格式化函数（大模型调用失败时的后备方案）
+ */
+function formatContextResultSimple(context: ContextIntegrationResult): string {
     let output = `# 搜索结果\n\n${context.summary}\n\n`;
     
     // 按重要性排序事实
     const sortedFacts = [...context.facts].sort((a, b) => b.importance - a.importance);
     
-    output += '## 关键信息\n\n';
-    sortedFacts.forEach((fact, index) => {
+    output += '## 关键代码位置\n\n';
+    sortedFacts.slice(0, 5).forEach((fact, index) => {
         const source = context.sources[fact.sourceIndex];
-        output += `### ${index + 1}. ${fact.type.toUpperCase()}\n`;
-        output += `**位置**: ${source.filePath}`;
+        output += `### ${index + 1}. ${source.filePath}`;
+        
         if (source.lineRange) {
             output += ` (行 ${source.lineRange})`;
         }
-        output += `\n**类型**: ${source.description}\n\n`;
-        output += '```\n' + fact.content + '\n```\n\n';
+        output += '\n';
+        
+        output += `**类型**: ${source.description}\n`;
+        output += `**重要性**: ${fact.importance}/5\n\n`;
+        
+        output += '```\n' + fact.content.slice(0, 200) + (fact.content.length > 200 ? '...' : '') + '\n```\n\n';
     });
     
     return output;
