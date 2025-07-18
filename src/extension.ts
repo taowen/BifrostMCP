@@ -16,7 +16,7 @@ import { createDebugPanel } from './debugPanel';
 import { mcpServer, httpServer, setMcpServer, setHttpServer } from './globals';
 import { runTool } from './toolRunner';
 import { findBifrostConfig, BifrostConfig, getProjectBasePath } from './config';
-import { smartSearch } from './smartSearch';
+import { smartSearch } from './search';
 
 export async function activate(context: vscode.ExtensionContext) {
     let currentConfig: BifrostConfig | null = null;

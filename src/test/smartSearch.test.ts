@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { smartSearch } from '../smartSearch';
+import { smartSearch } from '../search';
 
 suite('Smart Search Test Suite', () => {
     vscode.window.showInformationMessage('Starting Smart Search tests.');
