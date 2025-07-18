@@ -194,6 +194,8 @@ function buildIntegrationPrompt(context: ContextIntegrationResult): string {
 2. 提供代码片段的上下文说明
 3. 指出相关的文件和功能模块
 4. 保持客观，提供线索而非判断
+5. 对于我们这次发现的代码里提到了，但是没有全文的信息，给用户提示去查看完整代码
+6. 输出的条目应该尽可能的少，扔掉明显无关的信息
 
 ## 搜索摘要
 ${context.summary}
