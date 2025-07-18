@@ -12,6 +12,9 @@
   "engines": {
     "vscode": "^1.93.0"
   },
+  "enabledApiProposals": [
+    "languageModels"
+  ],
   "categories": [
     "Other",
     "Programming Languages",
@@ -25,7 +28,8 @@
     "find references"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onLanguageModelChat:copilot"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -45,6 +49,10 @@
       {
         "command": "bifrost-mcp.openDebugPanel",
         "title": "Bifrost MCP: Open Debug Panel"
+      },
+      {
+        "command": "bifrost-mcp.testLLM",
+        "title": "Bifrost MCP: Test LLM"
       }
     ]
   },

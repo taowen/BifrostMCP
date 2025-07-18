@@ -16,6 +16,7 @@ import { createDebugPanel } from './debugPanel';
 import { mcpServer, httpServer, setMcpServer, setHttpServer } from './globals';
 import { runTool } from './toolRunner';
 import { findBifrostConfig, BifrostConfig, getProjectBasePath } from './config';
+import { useCopilotChat } from './copilotChat';
 
 export async function activate(context: vscode.ExtensionContext) {
     let currentConfig: BifrostConfig | null = null;
@@ -68,6 +69,17 @@ export async function activate(context: vscode.ExtensionContext) {
             }
             
             vscode.window.showInformationMessage('MCP server stopped');
+        }),
+        vscode.commands.registerCommand('bifrost-mcp.testLLM', async () => {
+            try {
+                const response = await useCopilotChat('what is 1+1?');
+                vscode.window.showInformationMessage(`LLM Response: ${response.substring(0, 100)}${response.length > 100 ? '...' : ''}`);
+                console.log('Full LLM Response:', response);
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Failed to test LLM: ${errorMsg}`);
+                console.error('LLM Error:', error);
+            }
         })
     );
 
