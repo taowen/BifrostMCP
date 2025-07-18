@@ -16,7 +16,7 @@ import { createDebugPanel } from './debugPanel';
 import { mcpServer, httpServer, setMcpServer, setHttpServer } from './globals';
 import { runTool } from './toolRunner';
 import { findBifrostConfig, BifrostConfig, getProjectBasePath } from './config';
-import { useCopilotChat } from './copilotChat';
+import { smartSearch } from './smartSearch';
 
 export async function activate(context: vscode.ExtensionContext) {
     let currentConfig: BifrostConfig | null = null;
@@ -70,15 +70,42 @@ export async function activate(context: vscode.ExtensionContext) {
             
             vscode.window.showInformationMessage('MCP server stopped');
         }),
-        vscode.commands.registerCommand('bifrost-mcp.testLLM', async () => {
+        vscode.commands.registerCommand('bifrost-mcp.smartSearch', async () => {
             try {
-                const response = await useCopilotChat('what is 1+1?');
-                vscode.window.showInformationMessage(`LLM Response: ${response.substring(0, 100)}${response.length > 100 ? '...' : ''}`);
-                console.log('Full LLM Response:', response);
+                // 获取用户输入
+                const prompt = await vscode.window.showInputBox({
+                    placeHolder: '请输入您想要搜索或了解的内容...',
+                    prompt: '智能搜索 - 支持代码理解、修改建议等',
+                    ignoreFocusOut: true
+                });
+                
+                if (!prompt) {
+                    return; // 用户取消了输入
+                }
+                
+                // 显示进度指示器
+                const result = await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: '正在进行智能搜索...',
+                    cancellable: false
+                }, async (progress) => {
+                    progress.report({ increment: 0, message: '分析意图中...' });
+                    const searchResult = await smartSearch(prompt);
+                    progress.report({ increment: 100, message: '搜索完成!' });
+                    return searchResult;
+                });
+                
+                // 在新的编辑器中显示结果
+                const doc = await vscode.workspace.openTextDocument({
+                    content: result,
+                    language: 'markdown'
+                });
+                await vscode.window.showTextDocument(doc);
+                
             } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to test LLM: ${errorMsg}`);
-                console.error('LLM Error:', error);
+                vscode.window.showErrorMessage(`智能搜索失败: ${errorMsg}`);
+                console.error('Smart search error:', error);
             }
         })
     );

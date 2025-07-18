@@ -51,8 +51,8 @@
         "title": "Bifrost MCP: Open Debug Panel"
       },
       {
-        "command": "bifrost-mcp.testLLM",
-        "title": "Bifrost MCP: Test LLM"
+        "command": "bifrost-mcp.smartSearch",
+        "title": "Bifrost MCP: 智能搜索代码上下文"
       }
     ]
   },

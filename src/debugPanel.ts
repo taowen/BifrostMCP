@@ -21,7 +21,9 @@ export function createDebugPanel(context: vscode.ExtensionContext) {
     // Get workspace files for autocomplete
     async function getWorkspaceFiles(): Promise<string[]> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders) return [];
+        if (!workspaceFolders) {
+            return [];
+        }
 
         const files: string[] = [];
         for (const folder of workspaceFolders) {
