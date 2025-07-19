@@ -1,8 +1,7 @@
 import { useCopilotChat } from '../copilotChat';
 import { DebugLogger } from './logger';
-import { SearchResultItem, IntentAnalysis, RankedResultItem, BatchConfig, BatchRankingResult } from './types';
+import { SearchResultItem, RankedResultItem, BatchConfig, BatchRankingResult } from './types';
 import { getExtendedContext } from './utils';
-import * as vscode from 'vscode';
 
 /**
  * 默认批次处理配置

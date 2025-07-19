@@ -1,88 +1,217 @@
 import { useCopilotChat } from '../copilotChat';
 import { DebugLogger } from './logger';
-import { SearchResultItem } from './types';
+import { SearchResultItem, SearchPlan, SearchStrategy, SearchStrategyType } from './types';
 import { searchInWorkspace, getFileContent, getProjectStructure } from './utils';
 import * as vscode from 'vscode';
 
 /**
- * 分析查询并直接执行搜索
- * 使用大模型判断应该搜索什么以及如何搜索
+ * 分析查询并生成搜索计划
+ * 使用大模型制定多种搜索策略
  */
-export async function analyzeQueryAndSearch(prompt: string): Promise<SearchResultItem[]> {
+export async function analyzeQueryAndSearch(prompt: string): Promise<SearchPlan> {
     // 获取项目结构信息
     DebugLogger.log('Getting project structure...');
     const projectStructure = await getProjectStructure();
     DebugLogger.log('Project structure obtained');
     
     const analysisPrompt = `
-你是一个代码搜索专家。分析用户的查询并决定如何搜索相关代码。
+你是一个代码搜索专家。分析用户的查询并制定多种搜索策略。
 
 用户查询: "${prompt}"
 
 当前项目结构信息:
 ${projectStructure}
 
-请基于项目结构和用户查询，分析用户想要了解什么，并制定精准的搜索计划。以JSON格式返回：
+请基于项目结构和用户查询，制定多种搜索策略。以JSON格式返回：
 
 {
-  "searchTerms": ["搜索词1", "搜索词2", "搜索词3"],
-  "searchTypes": ["workspace_symbols", "text_search", "file_search"],
-  "filePatterns": ["*.ts", "*.js", "*.json"],
-  "priority": "high|medium|low"
+  "reasoning": "简要说明分析思路和为什么选择这些策略",
+  "confidence": 0.9,
+  "strategies": [
+    {
+      "type": "vscode_workspace_symbols",
+      "name": "符号搜索",
+      "description": "搜索工作区中的函数、类、变量等符号",
+      "searchTerms": ["关键词1", "关键词2"]
+    },
+    {
+      "type": "file_prediction",
+      "name": "文件推测",
+      "description": "基于项目结构直接推测相关文件",
+      "searchTerms": ["推测的文件名1", "推测的文件名2"]
+    },
+    {
+      "type": "text_search",
+      "name": "文本搜索",
+      "description": "在代码文件内容中搜索关键词或文本片段",
+      "searchTerms": ["关键词1", "关键词2"]
+    },
+    {
+      "type": "file_name_search",
+      "name": "文件名搜索", 
+      "description": "通过文件名或路径模式搜索相关文件",
+      "searchTerms": ["文件名模式1", "文件名模式2"]
+    }
+  ]
 }
 
-说明：
-- searchTerms: 关键搜索词，根据项目结构选择最相关的词汇
-- searchTypes: 搜索类型，可包含:
-  - "workspace_symbols": 搜索符号（函数、类等）
-  - "text_search": 文本内容搜索
-  - "file_search": 文件名搜索
-- filePatterns: 根据项目类型选择合适的文件模式
-- priority: 搜索优先级
+可用的搜索策略类型：
+- "vscode_workspace_symbols": VSCode 工作区符号搜索 (搜索工作区中的函数、类、变量等符号，支持模糊匹配)
+- "text_search": 关键词文本搜索 (在代码文件内容中搜索特定关键词或文本片段)
+- "file_name_search": 文件名搜索 (通过文件名或文件路径进行搜索，支持通配符匹配)
+- "file_prediction": 基于目录结构的文件推测 (根据项目结构和命名规范推测可能相关的文件)
 
-注意事项：
-1. 根据项目结构判断用户最可能需要的文件和符号
-2. 如果用户查询涉及入口点，考虑 package.json 中的 main 字段和 scripts
-3. 根据项目文件类型（如 TypeScript、JavaScript 等）调整搜索模式
-4. 优先搜索项目根目录下的重要文件
+策略选择原则：
+1. 根据用户查询意图选择最合适的搜索策略组合
+2. vscode_workspace_symbols 适用于搜索函数、类、变量等具体符号
+3. text_search 适用于搜索代码片段、注释、字符串等文本内容
+4. file_name_search 适用于查找特定的文件或按文件名模式搜索
+5. file_prediction 适用于根据项目结构推测可能相关的文件位置
+6. 每个策略应该有明确的搜索关键词和预期结果数量
+7. 优先级应该根据策略对用户查询的相关性和有效性设置
+8. 合理预测文件路径并包含在 file_prediction 策略中
 
 只返回JSON，不要其他解释：
 `;
 
     const response = await useCopilotChat(analysisPrompt);
-    DebugLogger.logGPTCall('Intent analysis', analysisPrompt, response);
+    DebugLogger.logGPTCall('Search plan generation', analysisPrompt, response);
     
     const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const searchPlan = JSON.parse(cleanResponse);
+    const planData = JSON.parse(cleanResponse);
     
-    DebugLogger.log('Search plan:', searchPlan);
+    // 构建搜索计划
+    const searchPlan: SearchPlan = {
+        strategies: planData.strategies.map((s: any) => ({
+            ...s,
+            status: 'pending' as const
+        })),
+        totalEstimatedTime: planData.strategies.length * 2000, // 估算每个策略2秒
+        confidence: planData.confidence || 0.8,
+        reasoning: planData.reasoning || '基于项目结构和用户查询生成的搜索计划'
+    };
     
-    // 执行搜索
+    DebugLogger.log('Generated search plan:', searchPlan);
+    
+    return searchPlan;
+}
+
+/**
+ * 执行搜索计划
+ */
+export async function executeSearchPlan(plan: SearchPlan): Promise<SearchResultItem[]> {
+    const allResults: SearchResultItem[] = [];
+    
+    for (const strategy of plan.strategies) {
+        try {
+            strategy.status = 'executing';
+            const startTime = Date.now();
+            
+            let results: SearchResultItem[] = [];
+            
+            switch (strategy.type) {
+                case 'vscode_workspace_symbols':
+                    results = await executeWorkspaceSymbolsSearch(strategy.searchTerms);
+                    break;
+                case 'text_search':
+                    results = await executeTextSearch(strategy.searchTerms);
+                    break;
+                case 'file_name_search':
+                    results = await executeFileNameSearch(strategy.searchTerms);
+                    break;
+                case 'file_prediction':
+                    results = await executeFilePrediction(strategy.searchTerms);
+                    break;
+                default:
+                    DebugLogger.log(`Unsupported strategy type: ${strategy.type}`);
+                    continue;
+            }
+            
+            strategy.results = results;
+            strategy.status = 'completed';
+            strategy.executionTime = Date.now() - startTime;
+            
+            allResults.push(...results);
+            
+            DebugLogger.log(`Strategy ${strategy.name} completed with ${results.length} results`);
+            
+        } catch (error) {
+            strategy.status = 'failed';
+            strategy.error = error instanceof Error ? error.message : String(error);
+            DebugLogger.log(`Strategy ${strategy.name} failed:`, error);
+        }
+    }
+    
+    return allResults;
+}
+
+/**
+ * 执行工作区符号搜索策略
+ */
+async function executeWorkspaceSymbolsSearch(searchTerms: string[]): Promise<SearchResultItem[]> {
     const results: SearchResultItem[] = [];
     
-    // 根据搜索计划执行相应的搜索
-    for (const searchType of searchPlan.searchTypes) {
-        switch (searchType) {
-            case 'workspace_symbols':
-                for (const term of searchPlan.searchTerms.slice(0, 3)) {
-                    const symbolResults = await searchWorkspaceSymbols(term);
-                    results.push(...symbolResults);
-                }
-                break;
-                
-            case 'text_search':
-                for (const term of searchPlan.searchTerms.slice(0, 3)) {
-                    const textResults = await searchInWorkspace(term);
-                    results.push(...textResults);
-                }
-                break;
-                
-            case 'file_search':
-                for (const term of searchPlan.searchTerms.slice(0, 3)) {
-                    const fileResults = await searchFiles(term, searchPlan.filePatterns);
-                    results.push(...fileResults);
-                }
-                break;
+    for (const term of searchTerms.slice(0, 3)) {
+        const symbolResults = await searchWorkspaceSymbols(term);
+        results.push(...symbolResults);
+    }
+    
+    return results;
+}
+
+/**
+ * 执行文本搜索策略
+ */
+async function executeTextSearch(searchTerms: string[]): Promise<SearchResultItem[]> {
+    const results: SearchResultItem[] = [];
+    
+    for (const term of searchTerms.slice(0, 3)) {
+        const textResults = await searchInWorkspace(term);
+        results.push(...textResults);
+    }
+    
+    return results;
+}
+
+/**
+ * 执行文件名搜索策略
+ */
+async function executeFileNameSearch(searchTerms: string[]): Promise<SearchResultItem[]> {
+    const results: SearchResultItem[] = [];
+    
+    for (const term of searchTerms.slice(0, 3)) {
+        const fileResults = await searchFiles(term);
+        results.push(...fileResults);
+    }
+    
+    return results;
+}
+
+/**
+ * 执行文件推测策略
+ */
+async function executeFilePrediction(predictedFiles: string[]): Promise<SearchResultItem[]> {
+    const results: SearchResultItem[] = [];
+    
+    for (const filePath of predictedFiles) {
+        try {
+            // 尝试找到匹配的文件
+            const files = await vscode.workspace.findFiles(
+                `**/*${filePath}*`,
+                '**/node_modules/**',
+                10
+            );
+            
+            for (const file of files) {
+                const content = await getFileContent(file);
+                results.push({
+                    uri: file,
+                    content: content.length > 1000 ? content.substring(0, 1000) + '...' : content,
+                    description: `Predicted file: ${vscode.workspace.asRelativePath(file)}`
+                });
+            }
+        } catch (error) {
+            DebugLogger.log(`Error in file prediction for ${filePath}:`, error);
         }
     }
     
@@ -160,78 +289,4 @@ async function searchFiles(searchTerm: string, patterns?: string[]): Promise<Sea
     }
     
     return results;
-}
-
-/**
- * 分析用户意图并提取关键实体
- * @deprecated 使用 analyzeQueryAndSearch 替代
- */
-export async function analyzeIntentAndExtractEntities(prompt: string): Promise<any> {
-    // 获取项目结构信息
-    const projectStructure = await getProjectStructure();
-    
-    const analysisPrompt = `
-你是一个代码搜索专家。分析用户的查询意图，提取关键信息，并制定搜索策略。
-
-用户查询: "${prompt}"
-
-当前项目结构信息:
-${projectStructure}
-
-请基于项目结构分析用户想要了解什么，并以JSON格式返回：
-
-1. intent: 用户的主要意图
-   - "find_entry" - 查找项目入口点、启动方式
-   - "find_structure" - 了解项目结构、架构
-   - "find_entity" - 查找特定的函数、类、变量等
-   - "understand_flow" - 理解执行流程、调用关系
-   - "find_usage" - 查找某个实体的使用方式
-   - "debug_issue" - 调试问题、查找错误原因
-   - "other" - 其他
-
-2. entities: 从查询中提取的关键实体，每个包含:
-   - name: 实体名称（如果是概念性的如"入口点"，使用相关关键词）
-   - type: "function" | "class" | "variable" | "file" | "module" | "interface" | "type" | "concept"
-   - confidence: 置信度(0-1)
-
-3. searchStrategy: 推荐的搜索策略数组，按优先级排序:
-   - "workspace_symbols" - 使用工作区符号搜索
-   - "text_search" - 文本内容搜索
-   - "file_structure" - 文件结构分析
-   - "config_files" - 配置文件分析
-   - "documentation" - 文档和注释搜索
-
-4. keyTerms: 提取的关键搜索词数组，用于文本搜索
-
-注意事项：
-1. 根据项目结构判断用户最可能需要的文件和符号
-2. 如果用户查询涉及入口点，考虑 package.json 中的信息
-3. 根据项目类型调整搜索策略
-
-示例:
-{
-  "intent": "find_entry",
-  "entities": [
-    {"name": "入口点", "type": "concept", "confidence": 0.9},
-    {"name": "main", "type": "function", "confidence": 0.7}
-  ],
-  "searchStrategy": ["config_files", "file_structure", "workspace_symbols", "text_search"],
-  "keyTerms": ["main", "index", "entry", "activate", "启动", "入口"]
-}
-
-只返回JSON，不要其他解释：
-`;
-
-    const response = await useCopilotChat(analysisPrompt);
-    DebugLogger.logGPTCall('Entity extraction', analysisPrompt, response);
-    
-    const cleanResponse = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return JSON.parse(cleanResponse);
-}
-
-/**
- * 直接使用聊天响应（当无法提取有用信息时）
- */
-export async function directChatResponse(prompt: string): Promise<string> {
-    return await useCopilotChat(prompt);
 }

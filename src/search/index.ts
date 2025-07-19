@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DebugLogger } from './logger';
-import { analyzeQueryAndSearch, directChatResponse } from './intent';
+import { analyzeQueryAndSearch, executeSearchPlan } from './intent';
 import { rankResultsByRelevance } from './ranking';
 import { integrateFinalContext, formatContextResult } from './context';
 import { SearchResultItem } from './types';
@@ -21,25 +21,29 @@ export async function smartSearch(prompt: string): Promise<string> {
             return '❌ 没有打开的工作区文件夹。请先打开一个包含代码的文件夹。';
         }
         
-        // 使用大模型分析查询并执行搜索
-        DebugLogger.log('Step 1: Analyzing query and executing search');
-        const searchResults = await analyzeQueryAndSearch(prompt);
-        DebugLogger.log(`Found ${searchResults.length} initial results`);
+        // 使用大模型分析查询并生成搜索计划
+        DebugLogger.log('Step 1: Analyzing query and generating search plan');
+        const searchPlan = await analyzeQueryAndSearch(prompt);
+        DebugLogger.log(`Generated search plan with ${searchPlan.strategies.length} strategies`);
         
-        // 如果没有找到任何结果，使用直接聊天响应
+        // 执行搜索计划
+        DebugLogger.log('Step 2: Executing search plan');
+        const searchResults = await executeSearchPlan(searchPlan);
+        DebugLogger.log(`Found ${searchResults.length} total results from all strategies`);
+        
         if (searchResults.length === 0) {
-            DebugLogger.log('No search results found, using direct chat response');
-            return await directChatResponse(prompt);
+            DebugLogger.log('No search results found');
+            return 'nothing found';
         }
         
         // 智能排序
-        DebugLogger.log('Step 2: Ranking results by relevance');
+        DebugLogger.log('Step 3: Ranking results by relevance');
         const rankedResults = await rankResultsByRelevance(prompt, searchResults);
         DebugLogger.log(`Processed ${rankedResults.length} results with intelligent ranking`);
         
         // 整合最终上下文信息
-        DebugLogger.log('Step 3: Integrating final context');
-        const contextResult = await integrateFinalContext(prompt, rankedResults, null);
+        DebugLogger.log('Step 4: Integrating final context');
+        const contextResult = await integrateFinalContext(prompt, rankedResults, searchPlan);
         
         DebugLogger.log('Smart search completed successfully');
         

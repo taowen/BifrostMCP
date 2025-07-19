@@ -19,13 +19,41 @@ export interface RankedResultItem extends SearchResultItem {
     extendedContext?: string;
 }
 
+
+
 /**
- * 意图分析结果
+ * 搜索策略类型
  */
-export interface IntentAnalysis {
-    intent: 'find_entry' | 'find_structure' | 'find_entity' | 'understand_flow' | 'find_usage' | 'debug_issue' | 'other';
-    searchStrategy: ('workspace_symbols' | 'text_search' | 'file_structure' | 'config_files' | 'documentation')[];
-    keyTerms: string[];
+export type SearchStrategyType = 
+    | 'vscode_workspace_symbols'   // VSCode 工作区符号搜索
+    | 'text_search'               // 关键词文本搜索
+    | 'file_name_search'          // 文件名搜索
+    | 'file_prediction';          // 基于目录结构的文件推测
+
+/**
+ * 搜索策略项
+ */
+export interface SearchStrategy {
+    type: SearchStrategyType;
+    name: string;
+    description: string;
+    searchTerms: string[];
+    priority: 'high' | 'medium' | 'low';
+    expectedResults: number;
+    results?: SearchResultItem[];
+    status?: 'pending' | 'executing' | 'completed' | 'failed';
+    executionTime?: number;
+    error?: string;
+}
+
+/**
+ * 搜索计划
+ */
+export interface SearchPlan {
+    strategies: SearchStrategy[];
+    totalEstimatedTime: number;
+    confidence: number;
+    reasoning: string;
 }
 
 /**
