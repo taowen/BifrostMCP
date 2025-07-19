@@ -17,17 +17,6 @@ export interface ContextIntegrationResult {
     originalPrompt: string;
 }
 
-/**
- * 第二轮搜索动作
- */
-export interface SecondRoundAction {
-    type: 'find_usages' | 'go_to_definition' | 'text_search';
-    symbol?: string;
-    file?: string;
-    line?: number;
-    keywords?: string[];
-    reason?: string;
-}
 
 /**
  * 过滤和去重搜索结果
@@ -116,10 +105,10 @@ function generateSearchSummary(
 }
 
 /**
- * 格式化上下文结果为文本 - 支持多轮搜索
+ * 格式化上下文结果为文本 - 基于第一轮搜索结果
  */
 export async function formatContextResult(context: ContextIntegrationResult): Promise<string> {
-    DebugLogger.log('Starting AI-powered context formatting with multi-round support');
+    DebugLogger.log('Starting AI-powered context formatting based on first round results');
     
     // 构建用于大模型的整合提示
     const integrationPrompt = buildIntegrationPrompt(context.originalPrompt, context);
@@ -127,35 +116,14 @@ export async function formatContextResult(context: ContextIntegrationResult): Pr
     // 调用大模型进行分析
     const aiResponse = await useCopilotChat(integrationPrompt);
     
-    DebugLogger.log('AI analysis completed, checking for second round needs');
+    DebugLogger.log('AI analysis completed, generating enhanced report');
     
-    // 尝试解析JSON响应
-    const cleanResponse = aiResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    let analysisResult;
-    
-    try {
-        analysisResult = JSON.parse(cleanResponse);
-    } catch (parseError) {
-        DebugLogger.log('Failed to parse AI response as JSON, using as final result');
-        return aiResponse;
-    }
-    
-    // 如果需要第二轮搜索
-    if (analysisResult.needsSecondRound && analysisResult.secondRoundActions?.length > 0) {
-        DebugLogger.log(`Starting second round with ${analysisResult.secondRoundActions.length} actions`);
-        
-        const secondRoundResults = await executeSecondRound(analysisResult.secondRoundActions);
-        
-        // 无论第二轮是否成功，都整合所有信息
-        return await generateFactualReport(context.originalPrompt, context.rankedResults, secondRoundResults, analysisResult.factualSummary);
-    }
-    
-    // 如果不需要第二轮，基于第一轮结果生成事实报告
-    return await generateFactualReport(context.originalPrompt, context.rankedResults, [], analysisResult.factualSummary);
+    // 生成增强的报告，包含文件清单等功能
+    return await generateEnhancedReport(context.originalPrompt, context.rankedResults, aiResponse);
 }
 
 /**
- * 构建用于大模型整合的提示 - 利用已有分析结果，专注于二轮决策
+ * 构建用于大模型整合的提示 - 利用已有分析结果生成客观总结
  */
 function buildIntegrationPrompt(originalPrompt: string, context: ContextIntegrationResult): string {
     let prompt = `问题："${originalPrompt}"\n\n已分析的结果：\n`;
@@ -190,243 +158,33 @@ function buildIntegrationPrompt(originalPrompt: string, context: ContextIntegrat
         prompt += `\n\n`;
     });
     
-    prompt += `分析是否需要第二轮搜索：
-- find_usages: 找到定义，需查看使用
-- go_to_definition: 找到调用，需查看实现  
-- text_search: 信息缺失，需补充搜索
+    prompt += `
 
-JSON格式：
-{
-  "factualSummary": "客观事实陈述",
-  "needsSecondRound": true/false,
-  "secondRoundActions": [
-    {"type": "find_usages", "symbol": "符号名", "file": "文件路径", "line": 行号}
-  ]
-}`;
+请基于以上搜索结果生成详细的分析报告。
+
+**要求：**
+1. 提供客观、准确的技术分析
+2. 明确标注每个重要发现的文件路径和行号
+3. 突出最相关和最重要的代码片段
+4. 使用清晰的格式，便于开发者理解和定位
+
+请直接生成分析报告：`;
 
     return prompt;
 }
 
 /**
- * 执行第二轮搜索
+ * 生成增强报告（保留原有功能但去掉第二轮搜索）
  */
-async function executeSecondRound(actions: SecondRoundAction[]): Promise<SearchResultItem[]> {
-    const results: SearchResultItem[] = [];
-    
-    for (const action of actions) {
-        DebugLogger.log(`Executing second round action: ${action.type}`);
-        
-        switch (action.type) {
-            case 'find_usages':
-                if (action.file && action.line !== undefined) {
-                    const usageResults = await executeFindUsages(action.file, action.line);
-                    results.push(...usageResults);
-                }
-                break;
-                
-            case 'go_to_definition':
-                if (action.file && action.line !== undefined) {
-                    const defResults = await executeGoToDefinition(action.file, action.line);
-                    results.push(...defResults);
-                }
-                break;
-                
-            case 'text_search':
-                if (action.keywords && action.keywords.length > 0) {
-                    for (const keyword of action.keywords.slice(0, 2)) {
-                        const textResults = await searchInWorkspace(keyword);
-                        results.push(...textResults.slice(0, 5)); // 每个关键词最多5个结果
-                    }
-                }
-                break;
-                
-            default:
-                DebugLogger.log(`Unsupported second round action: ${action.type}`);
-        }
-    }
-    
-    DebugLogger.log(`Second round completed with ${results.length} results`);
-    return results;
-}
-
-/**
- * 执行find_usages
- */
-async function executeFindUsages(filePath: string, line: number): Promise<SearchResultItem[]> {
-    try {
-        const uri = vscode.Uri.file(filePath);
-        const position = new vscode.Position(line - 1, 0); // 转换为0索引
-        
-        const locations = await vscode.commands.executeCommand<vscode.Location[]>(
-            'vscode.executeReferenceProvider',
-            uri,
-            position
-        );
-        
-        if (!locations || locations.length === 0) {
-            return [];
-        }
-        
-        const results: SearchResultItem[] = [];
-        
-        for (const location of locations.slice(0, 10)) {
-            try {
-                const document = await vscode.workspace.openTextDocument(location.uri);
-                const range = location.range;
-                
-                // 获取周围上下文
-                const startLine = Math.max(0, range.start.line - 3);
-                const endLine = Math.min(document.lineCount - 1, range.end.line + 3);
-                
-                let content = '';
-                for (let i = startLine; i <= endLine; i++) {
-                    content += document.lineAt(i).text + '\n';
-                }
-                
-                results.push({
-                    uri: location.uri,
-                    content,
-                    description: `Usage found: ${vscode.workspace.asRelativePath(location.uri)} (line ${range.start.line + 1})`
-                });
-            } catch (error) {
-                DebugLogger.log(`Error reading usage location: ${error}`);
-            }
-        }
-        
-        return results;
-    } catch (error) {
-        DebugLogger.log(`Error in find_usages: ${error}`);
-        return [];
-    }
-}
-
-/**
- * 执行go_to_definition
- */
-async function executeGoToDefinition(filePath: string, line: number): Promise<SearchResultItem[]> {
-    try {
-        const uri = vscode.Uri.file(filePath);
-        const position = new vscode.Position(line - 1, 0);
-        
-        const locations = await vscode.commands.executeCommand<vscode.Location[]>(
-            'vscode.executeDefinitionProvider',
-            uri,
-            position
-        );
-        
-        if (!locations || locations.length === 0) {
-            return [];
-        }
-        
-        const results: SearchResultItem[] = [];
-        
-        for (const location of locations.slice(0, 5)) {
-            try {
-                const document = await vscode.workspace.openTextDocument(location.uri);
-                const range = location.range;
-                
-                // 获取定义周围的上下文
-                const startLine = Math.max(0, range.start.line - 5);
-                const endLine = Math.min(document.lineCount - 1, range.end.line + 10);
-                
-                let content = '';
-                for (let i = startLine; i <= endLine; i++) {
-                    content += document.lineAt(i).text + '\n';
-                }
-                
-                results.push({
-                    uri: location.uri,
-                    content,
-                    description: `Definition found: ${vscode.workspace.asRelativePath(location.uri)} (line ${range.start.line + 1})`
-                });
-            } catch (error) {
-                DebugLogger.log(`Error reading definition location: ${error}`);
-            }
-        }
-        
-        return results;
-    } catch (error) {
-        DebugLogger.log(`Error in go_to_definition: ${error}`);
-        return [];
-    }
-}
-
-/**
- * 生成事实报告（充分利用已有AI分析结果，避免重复分析）
- */
-async function generateFactualReport(
+async function generateEnhancedReport(
     originalPrompt: string,
     firstRoundResults: RankedResultItem[],
-    secondRoundResults: SearchResultItem[],
-    firstRoundSummary: string
+    aiAnalysisReport: string
 ): Promise<string> {
-    DebugLogger.log('Starting optimized factual report generation using existing AI analysis');
+    DebugLogger.log('Starting enhanced report generation with file listing');
     
     const maxResults = 6;
-    
-    // 构建基于已有分析的信息整合
-    let allInformation = `查询: "${originalPrompt}"\n\n初步摘要: ${firstRoundSummary}\n\n详细分析结果:`;
-
-    // 使用已有的AI分析结果，而不是重新分析代码
     const limitedFirstRound = firstRoundResults.slice(0, maxResults);
-    limitedFirstRound.forEach((result, index) => {
-        allInformation += `\n\n${index + 1}. ${vscode.workspace.asRelativePath(result.uri)}`;
-        
-        if (result.symbolInfo?.location?.range) {
-            const range = result.symbolInfo.location.range;
-            allInformation += ` (第${range.start.line + 1}行)`;
-        }
-        
-        // 充分利用已有的AI分析结果
-        if (result.aiAnalysis) {
-            allInformation += `\n✓ 相关性评分: ${result.score}/10`;
-            allInformation += `\n✓ 相关性分析: ${result.aiAnalysis.relevanceAnalysis}`;
-            allInformation += `\n✓ 关键发现: ${result.aiAnalysis.keyFindings.join('、')}`;
-            allInformation += `\n✓ 使用场景: ${result.aiAnalysis.usageContext}`;
-            allInformation += `\n✓ 技术洞察: ${result.aiAnalysis.codeInsights}`;
-            allInformation += `\n✓ 简要评价: ${result.comment}`;
-        } else {
-            // 只在没有AI分析时才显示代码内容
-            const truncatedContent = result.content.length > 200 
-                ? result.content.substring(0, 200) + '...'
-                : result.content;
-            allInformation += `\n${result.description}\n\`\`\`\n${truncatedContent}\n\`\`\``;
-        }
-    });
-
-    // 添加第二轮补充信息（精简）
-    if (secondRoundResults.length > 0) {
-        allInformation += `\n\n补充发现:`;
-        
-        const limitedSecondRound = secondRoundResults.slice(0, 3);
-        limitedSecondRound.forEach((result, index) => {
-            const truncatedContent = result.content.length > 300 
-                ? result.content.substring(0, 300) + '...'
-                : result.content;
-                
-            allInformation += `\n+ ${vscode.workspace.asRelativePath(result.uri)}\n${result.description}\n\`\`\`\n${truncatedContent}\n\`\`\`\n`;
-        });
-    }
-
-    // 构建基于已有分析的整合提示
-    const analysisPrompt = `${allInformation}
-
-以上信息已经过AI深度分析。请基于现有的分析结果生成最终报告：
-
-1. 综合所有相关性分析和关键发现
-2. 整合技术洞察和使用场景
-3. 突出最重要的代码和发现
-4. 避免重复分析，直接利用已有结论
-
-**重要要求：**
-- 必须包含每个重要文件的完整路径信息
-- 在提到代码时，明确标注文件路径和行号
-- 使用清晰的格式，便于用户定位代码
-
-生成包含明确路径信息的分析报告：`;
-
-    // 使用AI进行基于已有分析的智能整合
-    const aiIntegratedReport = await useCopilotChat(analysisPrompt);
     
     // 只在有足够多高质量结果时才追加文件清单
     let structuredFileList = '';
@@ -467,21 +225,8 @@ async function generateFactualReport(
             
             structuredFileList += '\n';
         }
-        
-        // 添加第二轮结果的路径信息
-        if (secondRoundResults.length > 0) {
-            structuredFileList += '### 补充发现：\n';
-            const uniqueSecondRound = new Set<string>();
-            secondRoundResults.forEach(result => {
-                const relativePath = vscode.workspace.asRelativePath(result.uri);
-                if (!uniqueSecondRound.has(relativePath)) {
-                    uniqueSecondRound.add(relativePath);
-                    structuredFileList += `- ${relativePath}\n`;
-                }
-            });
-        }
     }
     
-    DebugLogger.log('AI factual report generation completed successfully');
-    return aiIntegratedReport + structuredFileList;
+    DebugLogger.log('Enhanced report generation completed successfully');
+    return aiAnalysisReport + structuredFileList;
 }
