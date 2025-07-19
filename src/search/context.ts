@@ -3,6 +3,7 @@ import { SearchResultItem, RankedResultItem, SearchPlan } from './types';
 import { useCopilotChat } from '../copilotChat';
 import { searchInWorkspace } from './utils';
 import * as vscode from 'vscode';
+import * as path from 'path';
 
 /**
  * 上下文整合结果
@@ -29,6 +30,40 @@ export interface SecondRoundAction {
 }
 
 /**
+ * 过滤和去重搜索结果
+ */
+function filterAndDeduplicateResults(results: RankedResultItem[]): RankedResultItem[] {
+    // 1. 过滤低质量结果（评分<5的）
+    const highQualityResults = results.filter(result => result.score >= 5);
+    
+    // 2. 按文件分组，每个文件最多保留2个最高分的结果
+    const fileGroups = new Map<string, RankedResultItem[]>();
+    
+    for (const result of highQualityResults) {
+        const filePath = result.uri.fsPath;
+        if (!fileGroups.has(filePath)) {
+            fileGroups.set(filePath, []);
+        }
+        fileGroups.get(filePath)!.push(result);
+    }
+    
+    // 3. 每个文件只保留前2个最高分结果
+    const deduplicatedResults: RankedResultItem[] = [];
+    
+    for (const [filePath, fileResults] of fileGroups) {
+        // 按评分排序，取前2个
+        const sortedFileResults = fileResults
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 2);
+        
+        deduplicatedResults.push(...sortedFileResults);
+    }
+    
+    // 4. 最终按评分排序
+    return deduplicatedResults.sort((a, b) => b.score - a.score);
+}
+
+/**
  * 整合最终上下文 - 直接使用排序后的结果
  */
 export async function integrateFinalContext(
@@ -38,8 +73,9 @@ export async function integrateFinalContext(
 ): Promise<ContextIntegrationResult> {
     DebugLogger.log(`Integrating final context for ${rankedResults.length} results`);
     
-    // 取前N个最相关的结果
-    const topResults = rankedResults.slice(0, 10);
+    // 过滤和去重高质量结果
+    const filteredResults = filterAndDeduplicateResults(rankedResults);
+    const topResults = filteredResults.slice(0, 8);
     
     // 生成搜索摘要
     const summary = generateSearchSummary(originalPrompt, topResults, searchPlan);
@@ -119,46 +155,52 @@ export async function formatContextResult(context: ContextIntegrationResult): Pr
 }
 
 /**
- * 构建用于大模型整合的提示 - 简化版本，判断是否需要第二轮搜索
+ * 构建用于大模型整合的提示 - 利用已有分析结果，专注于二轮决策
  */
 function buildIntegrationPrompt(originalPrompt: string, context: ContextIntegrationResult): string {
-    let prompt = `用户问题："${originalPrompt}"
+    let prompt = `问题："${originalPrompt}"\n\n已分析的结果：\n`;
 
-搜索结果：
-`;
-
-    // 简化的结果格式，让大模型自己理解
-    context.rankedResults.forEach((result, index) => {
-        prompt += `${index + 1}. ${result.uri.fsPath}`;
+    // 使用更少的结果，但利用已有的分析
+    const maxResults = 6;
+    
+    const limitedResults = context.rankedResults.slice(0, maxResults);
+    limitedResults.forEach((result, index) => {
+        prompt += `${index + 1}. ${vscode.workspace.asRelativePath(result.uri)}`;
         
         if (result.symbolInfo?.location?.range) {
             const range = result.symbolInfo.location.range;
-            prompt += ` (行 ${range.start.line + 1}-${range.end.line + 1})`;
+            prompt += ` (L${range.start.line + 1})`;
         }
         
-        prompt += `
-${result.description}
-\`\`\`
-${result.content}
-\`\`\`
-
-`;
+        // 利用已有的AI分析结果，避免重复分析代码内容
+        if (result.aiAnalysis) {
+            prompt += `\n评分: ${result.score}/10`;
+            prompt += `\n相关性: ${result.aiAnalysis.relevanceAnalysis}`;
+            prompt += `\n关键发现: ${result.aiAnalysis.keyFindings.join(', ')}`;
+            prompt += `\n使用场景: ${result.aiAnalysis.usageContext}`;
+            prompt += `\n技术洞察: ${result.aiAnalysis.codeInsights}`;
+        } else {
+            // 回退：如果没有分析结果，显示简化内容
+            const truncatedContent = result.content.length > 100 
+                ? result.content.substring(0, 100) + '...'
+                : result.content;
+            prompt += `\n${result.description}\n\`\`\`\n${truncatedContent}\n\`\`\``;
+        }
+        
+        prompt += `\n\n`;
     });
     
-    prompt += `请分析这些搜索结果并判断是否需要第二轮精确搜索：
+    prompt += `分析是否需要第二轮搜索：
+- find_usages: 找到定义，需查看使用
+- go_to_definition: 找到调用，需查看实现  
+- text_search: 信息缺失，需补充搜索
 
-高价值的第二轮场景：
-- find_usages: 找到函数/方法定义，需要查看使用位置
-- go_to_definition: 找到调用，需要查看具体实现
-- text_search: 发现关键信息缺失，需要补充搜索
-
-输出JSON格式：
+JSON格式：
 {
-  "factualSummary": "基于搜索结果的客观事实陈述，不试图回答用户问题，只整合发现的信息",
+  "factualSummary": "客观事实陈述",
   "needsSecondRound": true/false,
   "secondRoundActions": [
-    {"type": "find_usages", "symbol": "具体符号名", "file": "文件路径", "line": 行号},
-    {"type": "text_search", "keywords": ["关键词1", "关键词2"], "reason": "搜索原因"}
+    {"type": "find_usages", "symbol": "符号名", "file": "文件路径", "line": 行号}
   ]
 }`;
 
@@ -310,7 +352,7 @@ async function executeGoToDefinition(filePath: string, line: number): Promise<Se
 }
 
 /**
- * 生成事实报告（使用AI智能整合第一轮和第二轮的所有信息）
+ * 生成事实报告（充分利用已有AI分析结果，避免重复分析）
  */
 async function generateFactualReport(
     originalPrompt: string,
@@ -318,71 +360,128 @@ async function generateFactualReport(
     secondRoundResults: SearchResultItem[],
     firstRoundSummary: string
 ): Promise<string> {
-    DebugLogger.log('Starting AI-powered factual report generation');
+    DebugLogger.log('Starting optimized factual report generation using existing AI analysis');
     
-    // 构建完整的信息源给大模型分析
-    let allInformation = `# 原始查询
-"${originalPrompt}"
+    const maxResults = 6;
+    
+    // 构建基于已有分析的信息整合
+    let allInformation = `查询: "${originalPrompt}"\n\n初步摘要: ${firstRoundSummary}\n\n详细分析结果:`;
 
-# 第一轮搜索摘要
-${firstRoundSummary}
-
-# 第一轮详细发现
-`;
-
-    // 添加第一轮结果的完整信息
-    firstRoundResults.forEach((result, index) => {
-        allInformation += `\n## 发现 ${index + 1}: ${result.uri.fsPath}`;
+    // 使用已有的AI分析结果，而不是重新分析代码
+    const limitedFirstRound = firstRoundResults.slice(0, maxResults);
+    limitedFirstRound.forEach((result, index) => {
+        allInformation += `\n\n${index + 1}. ${vscode.workspace.asRelativePath(result.uri)}`;
         
         if (result.symbolInfo?.location?.range) {
             const range = result.symbolInfo.location.range;
-            allInformation += ` (行 ${range.start.line + 1}-${range.end.line + 1})`;
+            allInformation += ` (第${range.start.line + 1}行)`;
         }
         
-        allInformation += `\n**类型**: ${result.description}`;
-        
-        if (result.score) {
-            allInformation += `\n**相关性评分**: ${result.score}/10`;
+        // 充分利用已有的AI分析结果
+        if (result.aiAnalysis) {
+            allInformation += `\n✓ 相关性评分: ${result.score}/10`;
+            allInformation += `\n✓ 相关性分析: ${result.aiAnalysis.relevanceAnalysis}`;
+            allInformation += `\n✓ 关键发现: ${result.aiAnalysis.keyFindings.join('、')}`;
+            allInformation += `\n✓ 使用场景: ${result.aiAnalysis.usageContext}`;
+            allInformation += `\n✓ 技术洞察: ${result.aiAnalysis.codeInsights}`;
+            allInformation += `\n✓ 简要评价: ${result.comment}`;
+        } else {
+            // 只在没有AI分析时才显示代码内容
+            const truncatedContent = result.content.length > 200 
+                ? result.content.substring(0, 200) + '...'
+                : result.content;
+            allInformation += `\n${result.description}\n\`\`\`\n${truncatedContent}\n\`\`\``;
         }
-        
-        allInformation += `\n**代码内容**:\n\`\`\`\n${result.content}\n\`\`\`\n`;
     });
 
-    // 添加第二轮补充信息
+    // 添加第二轮补充信息（精简）
     if (secondRoundResults.length > 0) {
-        allInformation += `\n# 第二轮精确搜索补充信息\n`;
+        allInformation += `\n\n补充发现:`;
         
-        secondRoundResults.forEach((result, index) => {
-            allInformation += `\n## 补充发现 ${index + 1}: ${result.uri.fsPath}`;
-            allInformation += `\n**类型**: ${result.description}`;
-            allInformation += `\n**代码内容**:\n\`\`\`\n${result.content}\n\`\`\`\n`;
+        const limitedSecondRound = secondRoundResults.slice(0, 3);
+        limitedSecondRound.forEach((result, index) => {
+            const truncatedContent = result.content.length > 300 
+                ? result.content.substring(0, 300) + '...'
+                : result.content;
+                
+            allInformation += `\n+ ${vscode.workspace.asRelativePath(result.uri)}\n${result.description}\n\`\`\`\n${truncatedContent}\n\`\`\`\n`;
         });
     }
 
-    // 构建让大模型智能整合分析的提示
+    // 构建基于已有分析的整合提示
     const analysisPrompt = `${allInformation}
 
-# 分析任务
-作为专业的代码分析师，请基于以上所有搜索发现的信息，生成一份高质量的事实整合报告。
+以上信息已经过AI深度分析。请基于现有的分析结果生成最终报告：
 
-## 分析要求：
-1. **智能过滤**: 识别并丢弃明显与原始查询无关的信息
-2. **信息整合**: 将相关信息组织成完整的叙事逻辑
-3. **相关性说明**: 明确解释每部分信息如何支撑回答原始查询
-4. **缺失分析**: 指出残缺的代码片段中指向的关联信息
-5. **客观结论**: 基于现有证据给出客观的发现总结
+1. 综合所有相关性分析和关键发现
+2. 整合技术洞察和使用场景
+3. 突出最重要的代码和发现
+4. 避免重复分析，直接利用已有结论
 
-## 输出格式要求：
-- 使用清晰的标题结构
-- 突出关键发现和代码片段
-- 避免冗余重复
-- 保持客观和事实性
+**重要要求：**
+- 必须包含每个重要文件的完整路径信息
+- 在提到代码时，明确标注文件路径和行号
+- 使用清晰的格式，便于用户定位代码
 
-请生成完整的分析报告：`;
+生成包含明确路径信息的分析报告：`;
 
-    // 使用AI进行智能整合分析
+    // 使用AI进行基于已有分析的智能整合
     const aiIntegratedReport = await useCopilotChat(analysisPrompt);
     
+    // 只在有足够多高质量结果时才追加文件清单
+    let structuredFileList = '';
+    
+    // 检查是否有多个不同的文件
+    const uniqueFiles = new Set(limitedFirstRound.map(r => r.uri.fsPath));
+    const hasHighQualityResults = limitedFirstRound.some(r => r.score >= 7);
+    
+    if (uniqueFiles.size > 1 && hasHighQualityResults) {
+        structuredFileList = '\n\n## 📁 关键文件位置\n\n';
+        
+        // 按文件分组显示
+        const fileGroups = new Map<string, RankedResultItem[]>();
+        limitedFirstRound.forEach(result => {
+            const filePath = result.uri.fsPath;
+            if (!fileGroups.has(filePath)) {
+                fileGroups.set(filePath, []);
+            }
+            fileGroups.get(filePath)!.push(result);
+        });
+        
+        for (const [filePath, results] of fileGroups) {
+            const bestResult = results.sort((a, b) => b.score - a.score)[0];
+            const relativePath = vscode.workspace.asRelativePath(bestResult.uri);
+            
+            structuredFileList += `**${relativePath}**\n`;
+            
+            if (bestResult.symbolInfo?.location?.range) {
+                const range = bestResult.symbolInfo.location.range;
+                structuredFileList += `   📍 第 ${range.start.line + 1} 行`;
+            }
+            
+            structuredFileList += ` (评分: ${bestResult.score}/10)\n`;
+            
+            if (bestResult.aiAnalysis && bestResult.aiAnalysis.keyFindings.length > 0) {
+                structuredFileList += `   🔍 ${bestResult.aiAnalysis.keyFindings[0]}\n`;
+            }
+            
+            structuredFileList += '\n';
+        }
+        
+        // 添加第二轮结果的路径信息
+        if (secondRoundResults.length > 0) {
+            structuredFileList += '### 补充发现：\n';
+            const uniqueSecondRound = new Set<string>();
+            secondRoundResults.forEach(result => {
+                const relativePath = vscode.workspace.asRelativePath(result.uri);
+                if (!uniqueSecondRound.has(relativePath)) {
+                    uniqueSecondRound.add(relativePath);
+                    structuredFileList += `- ${relativePath}\n`;
+                }
+            });
+        }
+    }
+    
     DebugLogger.log('AI factual report generation completed successfully');
-    return aiIntegratedReport;
+    return aiIntegratedReport + structuredFileList;
 }

@@ -140,20 +140,33 @@ ${enhancedResults.map((result, index) =>
     `标识符: ${resultIdentifiers[index]}\n` +
     `类型: ${result.description}\n` +
     `文件: ${result.uri.fsPath}\n` +
-    `原始内容:\n${result.content}\n` +
-    `扩展上下文:\n${result.extendedContext}\n`
+    `代码内容:\n${result.content}\n` +
+    `上下文:\n${result.extendedContext}\n`
 ).join('\n---\n')}
 
-请仔细分析每个代码片段与用户查询的相关性，考虑以下因素：
-1. 直接回答用户问题的程度
-2. 代码的重要性和核心程度  
-3. 与查询主题的匹配度
-4. 代码的完整性和可理解性
-5. 实用价值和参考意义
+**重要：请严格按照以下标准评分，避免所有结果都给相同评分**
 
-对于每个代码片段，请提供：
+评分标准：
+- 9-10分：直接回答用户问题的核心代码，完全匹配查询意图
+- 7-8分：与查询高度相关，提供重要信息或实现
+- 5-6分：与查询相关，但不是核心功能或主要实现
+- 3-4分：间接相关，可能提供参考价值
+- 1-2分：基本无关或重复信息
+
+分析要求：
+1. 仔细阅读代码内容，理解其具体功能
+2. 判断代码与查询的直接关联程度
+3. 识别关键实现细节和技术要点
+4. 评估代码的实用性和参考价值
+5. 确保评分有明显区分度
+
+对于每个代码片段，请提供详细分析：
 - 相关性评分（1-10分）
-- 详细评论，说明这个文件/代码有助于什么，或者我们能得出什么结论
+- 相关性分析：为什么与查询相关/不相关
+- 关键发现：从代码中发现的重要信息（数组）
+- 使用场景：这段代码的典型用途
+- 代码洞察：技术实现的要点或值得注意的地方
+- 简短评论：一句话总结价值
 
 请按照相关性从高到低的顺序，返回排序后的结果。
 返回JSON格式，格式为: {
@@ -162,7 +175,11 @@ ${enhancedResults.map((result, index) =>
         {
             "identifier": "标识符",
             "score": 评分,
-            "comment": "这个文件有助于xxx，或者我们能得出xxx结论"
+            "comment": "一句话总结价值",
+            "relevanceAnalysis": "详细的相关性分析",
+            "keyFindings": ["发现1", "发现2", "发现3"],
+            "usageContext": "使用场景描述",
+            "codeInsights": "技术洞察"
         }
     ]
 }
@@ -192,7 +209,15 @@ ${enhancedResults.map((result, index) =>
                         description: originalResult.description,
                         score: rankedItem.score || 5,
                         comment: rankedItem.comment || '无评论',
-                        extendedContext: originalResult.extendedContext
+                        extendedContext: originalResult.extendedContext,
+                        // 保存AI分析结果，供后续使用
+                        aiAnalysis: {
+                            relevanceAnalysis: rankedItem.relevanceAnalysis || '',
+                            keyFindings: rankedItem.keyFindings || [],
+                            usageContext: rankedItem.usageContext || '',
+                            codeInsights: rankedItem.codeInsights || '',
+                            batchReason: rankingResult.reason || ''
+                        }
                     });
                 }
             }
@@ -212,7 +237,14 @@ ${enhancedResults.map((result, index) =>
                         description: originalResult.description,
                         score: 3,
                         comment: '未被大模型评估的结果',
-                        extendedContext: originalResult.extendedContext
+                        extendedContext: originalResult.extendedContext,
+                        aiAnalysis: {
+                            relevanceAnalysis: '未进行AI分析',
+                            keyFindings: [],
+                            usageContext: '未知',
+                            codeInsights: '无分析',
+                            batchReason: '遗漏结果'
+                        }
                     });
                 }
             }
@@ -226,7 +258,14 @@ ${enhancedResults.map((result, index) =>
                     description: result.description,
                     score: 5,
                     comment: '大模型返回格式错误，使用默认评分',
-                    extendedContext: result.extendedContext
+                    extendedContext: result.extendedContext,
+                    aiAnalysis: {
+                        relevanceAnalysis: '大模型返回格式错误',
+                        keyFindings: [],
+                        usageContext: '未知',
+                        codeInsights: '无分析',
+                        batchReason: '格式错误回退'
+                    }
                 });
             }
         }
@@ -249,7 +288,14 @@ ${enhancedResults.map((result, index) =>
             description: result.description,
             score: 5,
             comment: `批次处理失败: ${error}`,
-            extendedContext: result.extendedContext
+            extendedContext: result.extendedContext,
+            aiAnalysis: {
+                relevanceAnalysis: `处理失败: ${error}`,
+                keyFindings: [],
+                usageContext: '未知',
+                codeInsights: '无分析',
+                batchReason: '处理异常'
+            }
         }));
         
         return {

@@ -17,6 +17,15 @@ export interface RankedResultItem extends SearchResultItem {
     score: number;
     comment: string;
     extendedContext?: string;
+    
+    // 新增：保存分析结果，避免重复计算
+    aiAnalysis?: {
+        relevanceAnalysis: string;      // 相关性分析
+        keyFindings: string[];          // 关键发现
+        usageContext: string;           // 使用场景
+        codeInsights: string;           // 代码洞察
+        batchReason?: string;           // 批次排序原因
+    };
 }
 
 
